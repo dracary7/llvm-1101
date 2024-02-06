@@ -196,6 +196,58 @@ using DomTreeCallback = function_ref<const DominatorTree *(Function &F)>;
 using PostDomTreeCallback =
     function_ref<const PostDominatorTree *(Function &F)>;
 
+#define MAX_FUNCS 0x100
+#define ONCE_FUNCS 0x10
+
+extern "C"{
+  typedef struct ipt
+  {
+    int capacity;
+    int size;
+    char *func[];
+  }ipt;
+}
+
+ipt *ipt_table = NULL;
+
+void init_ipt()
+{
+  char *ipt_file = getenv("IPT_FILE");
+  if (ipt_file != NULL)
+  {
+    ipt_table = (ipt*)malloc(sizeof(ipt)+ONCE_FUNCS*sizeof(char *));
+    ipt_table->size = 0;
+    ipt_table->capacity = ONCE_FUNCS;
+    FILE *fp = fopen(ipt_file, "r");
+
+    if (fp == NULL) {
+      fprintf(stderr, "Cannot open $IPT_FILE.\n");
+      assert (false);
+    }
+    char buf[MAX_FUNCS] = {};
+    while (1)
+    {
+      fscanf(fp, "%s\n", buf);
+      if (strlen(buf) == 0)
+        break;
+
+      if (ipt_table->size == ipt_table->capacity) {
+        ipt_table = (ipt*)realloc(ipt_table, sizeof(ipt)+(ipt_table->capacity+ONCE_FUNCS)*sizeof(char *));
+        ipt_table->capacity += ONCE_FUNCS;
+      }
+      ipt_table->func[ipt_table->size] = strdup(buf);
+      ipt_table->size++;
+      memset(buf, 0, sizeof(buf));
+    }
+  }
+  else{
+    ipt_table = (ipt*)malloc(sizeof(ipt));
+    ipt_table->size = 0 ;
+    ipt_table->capacity = 0;
+  }
+  return;
+}
+
 class ModuleSanitizerCoverage {
 public:
   ModuleSanitizerCoverage(
@@ -203,7 +255,9 @@ public:
       const SpecialCaseList *Allowlist = nullptr,
       const SpecialCaseList *Blocklist = nullptr)
       : Options(OverrideFromCL(Options)), Allowlist(Allowlist),
-        Blocklist(Blocklist) {}
+        Blocklist(Blocklist) {
+          init_ipt();
+        }
   bool instrumentModule(Module &M, DomTreeCallback DTCallback,
                         PostDomTreeCallback PDTCallback);
 
@@ -895,6 +949,9 @@ void ModuleSanitizerCoverage::InjectTraceForCmp(
   }
 }
 
+#define SANCOV_FUNCHEADER 0x1
+#define SANCOV_FUNCIPT 0x2
+
 void ModuleSanitizerCoverage::InjectCoverageAtBlock(Function &F, BasicBlock &BB,
                                                     size_t Idx,
                                                     bool IsLeafFunc) {
@@ -915,6 +972,13 @@ void ModuleSanitizerCoverage::InjectCoverageAtBlock(Function &F, BasicBlock &BB,
   IRBuilder<> IRB(&*IP);
   IRB.SetCurrentDebugLocation(EntryLoc);
   if (Options.TracePC) {
+    if(IsEntryBB)
+      flags = flags | SANCOV_FUNCHEADER;
+    for(int i=0; i < ipt_table->size; i++){
+      if(!strcmp(func_name, ipt_table->func[i])){
+        flags = flags | SANCOV_FUNCIPT;
+        }
+    }
     IRB.CreateCall(SanCovTracePC)
         ->setCannotMerge(); // gets the PC using GET_CALLER_PC.
   }
