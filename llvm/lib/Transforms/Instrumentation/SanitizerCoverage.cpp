@@ -957,6 +957,8 @@ void ModuleSanitizerCoverage::InjectCoverageAtBlock(Function &F, BasicBlock &BB,
                                                     bool IsLeafFunc) {
   BasicBlock::iterator IP = BB.getFirstInsertionPt();
   bool IsEntryBB = &BB == &F.getEntryBlock();
+  const char *func_name = F.getName().data();
+
   DebugLoc EntryLoc;
   if (IsEntryBB) {
     if (auto SP = F.getSubprogram())
@@ -972,6 +974,7 @@ void ModuleSanitizerCoverage::InjectCoverageAtBlock(Function &F, BasicBlock &BB,
   IRBuilder<> IRB(&*IP);
   IRB.SetCurrentDebugLocation(EntryLoc);
   if (Options.TracePC) {
+    int flags = 0;
     if(IsEntryBB)
       flags = flags | SANCOV_FUNCHEADER;
     for(int i=0; i < ipt_table->size; i++){
